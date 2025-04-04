@@ -6,8 +6,10 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use std::io::{Result, Write, stdout};
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader, Write};
 use std::time::{Duration, Instant};
+use std::{env, io::stdout};
 
 // Simple editor mode enum
 #[derive(PartialEq, Clone, Copy)]
@@ -25,18 +27,30 @@ struct Editor {
     cursor_visible: bool,
     last_blink: Instant,
     blink_interval: Duration,
+    filename: Option<String>,
 }
 
 impl Editor {
-    fn new() -> Self {
+    fn new(filename: Option<String>) -> Self {
+        let mut buffer = vec![String::new()];
+        if let Some(ref name) = filename {
+            if let Ok(file) = File::open(name) {
+                buffer = BufReader::new(file)
+                    .lines()
+                    .filter_map(Result::ok)
+                    .collect();
+            }
+        }
+
         Editor {
-            buffer: vec![String::new()],
+            buffer,
             cursor_x: 0,
             cursor_y: 0,
             mode: Mode::Normal,
             cursor_visible: true,
             last_blink: Instant::now(),
             blink_interval: Duration::from_millis(500), // Blink every 500ms
+            filename,
         }
     }
 
@@ -48,7 +62,7 @@ impl Editor {
         }
     }
 
-    fn render<W: Write>(&mut self, out: &mut W) -> Result<()> {
+    fn render<W: Write>(&mut self, out: &mut W) -> Result<(), Box<dyn std::error::Error>> {
         // Update cursor blinking state
         self.update_cursor_blink();
 
@@ -131,7 +145,7 @@ impl Editor {
             Mode::Insert => "INSERT",
         };
 
-        let (term_width, term_height) = crossterm::terminal::size()?;
+        let (_term_width, term_height) = crossterm::terminal::size()?;
         let status = format!(
             "{} | Line: {}, Col: {} ",
             mode_str,
@@ -209,14 +223,88 @@ impl Editor {
                 self.cursor_x = if line_len > 0 { line_len } else { 0 };
                 false
             }
+            KeyCode::Char(':') => {
+                stdout().flush().unwrap();
 
+                self.prompt_and_execute_command();
+                false
+            }
             // Quit
+            // move this to command executor at some point
             KeyCode::Char('q') => true,
-
             _ => false,
         }
     }
 
+    fn prompt_and_execute_command(&mut self) {
+        io::stdout().flush().unwrap();
+
+        disable_raw_mode().unwrap();
+        print!(": ");
+
+        io::stdout().flush().unwrap();
+
+        let mut command = String::new();
+        io::stdin().read_line(&mut command).unwrap();
+
+        io::stdout().flush().unwrap();
+
+        let command = command.trim();
+        match command {
+            "w" => self.save_buffer(),
+            "q" => std::process::exit(0),
+            "wq" => {
+                self.save_buffer();
+                std::process::exit(0);
+            }
+            _ => {
+                println!("Unsupported or unknown command: {}", command);
+            }
+        }
+
+        enable_raw_mode().unwrap();
+    }
+
+    fn save_buffer(&mut self) {
+        let filename = match &self.filename {
+            Some(name) => name.clone(),
+            None => {
+                print!("Enter filename: ");
+                io::stdout().flush().unwrap(); // Flush to ensure prompt appears
+
+                let mut name = String::new();
+                if io::stdin().read_line(&mut name).is_err() {
+                    println!("Failed to read filename.");
+                    return;
+                }
+
+                let trimmed_name = name.trim().to_string();
+                if trimmed_name.is_empty() {
+                    println!("Filename cannot be empty!");
+                    return;
+                }
+
+                trimmed_name
+            }
+        };
+
+        match File::create(&filename) {
+            Ok(mut file) => {
+                for line in &self.buffer {
+                    if writeln!(file, "{}", line).is_err() {
+                        println!("Failed to write to file.");
+                        return;
+                    }
+                }
+
+                println!("File saved: {}", filename);
+                self.filename = Some(filename);
+            }
+            Err(err) => {
+                println!("Failed to create file: {}", err);
+            }
+        }
+    }
     fn handle_insert_key(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Esc => {
@@ -322,14 +410,17 @@ impl Editor {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = stdout();
     execute!(stdout, EnterAlternateScreen, Hide)?;
 
+    let args: Vec<String> = env::args().collect();
+    let filename = args.get(1).cloned();
+
     // Create editor
-    let mut editor = Editor::new();
+    let mut editor = Editor::new(filename);
 
     // Main loop
     let mut should_quit = false;
@@ -361,4 +452,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
