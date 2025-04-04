@@ -10,26 +10,33 @@ use std::{
     io::{BufRead, BufReader, Write, stdin, stdout},
 };
 
-use crate::{cursor::Cursor, mode::Mode};
+use crate::{buffer::Buffer, cursor::Cursor, mode::Mode};
 
 pub struct Editor {
-    buffer: Vec<String>,
     cursor: Cursor,
+    buffer: Buffer,
     mode: Mode,
-    filename: Option<String>,
 }
 
 impl Editor {
     pub fn new(filename: Option<String>) -> Self {
-        let mut buffer = vec![String::new()];
+        let mut buffer_content = vec![String::new()];
+
         if let Some(ref name) = filename {
             if let Ok(file) = File::open(name) {
-                buffer = BufReader::new(file)
+                buffer_content = BufReader::new(file)
                     .lines()
                     .filter_map(Result::ok)
                     .collect();
             }
         }
+
+        let buffer = Buffer {
+            lines: 0,
+            active_line: 0,
+            buffer_name: filename.unwrap_or("".to_string()),
+            buffer_text: buffer_content,
+        };
 
         let cursor = Cursor::new();
 
@@ -37,7 +44,6 @@ impl Editor {
             buffer,
             cursor,
             mode: Mode::Normal,
-            filename,
         }
     }
 
@@ -57,7 +63,7 @@ impl Editor {
         )?;
         queue!(out, MoveTo(0, 0))?;
 
-        for (y, line) in self.buffer.iter().enumerate() {
+        for (y, line) in self.buffer.buffer_text.iter().enumerate() {
             queue!(out, MoveTo(0, y as u16))?;
 
             if y == self.cursor.x {
@@ -131,7 +137,7 @@ impl Editor {
         queue!(
             out,
             MoveTo(0, term_height - 2),
-            SetBackgroundColor(Color::Blue),
+            SetBackgroundColor(Color::Green),
             SetForegroundColor(Color::White),
             Print(status),
             ResetColor
@@ -157,10 +163,10 @@ impl Editor {
                 false
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                if self.cursor.y < self.buffer.len() - 1 {
+                if self.cursor.y < self.buffer.buffer_text.len() - 1 {
                     self.cursor.y += 1;
                     // Adjust x if necessary
-                    let line_len = self.buffer[self.cursor.y].len();
+                    let line_len = self.buffer.buffer_text[self.cursor.y].len();
                     if self.cursor.x > line_len {
                         self.cursor.x = line_len;
                     }
@@ -170,7 +176,7 @@ impl Editor {
             KeyCode::Char('k') | KeyCode::Up => {
                 if self.cursor.y > 0 {
                     self.cursor.y -= 1;
-                    let line_len = self.buffer[self.cursor.y].len();
+                    let line_len = self.buffer.buffer_text[self.cursor.y].len();
                     if self.cursor.x > line_len {
                         self.cursor.x = line_len;
                     }
@@ -178,7 +184,7 @@ impl Editor {
                 false
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                let line_len = self.buffer[self.cursor.y].len();
+                let line_len = self.buffer.buffer_text[self.cursor.y].len();
                 if self.cursor.x < line_len {
                     self.cursor.x += 1;
                 }
@@ -190,7 +196,7 @@ impl Editor {
                 false
             }
             KeyCode::Char('$') => {
-                let line_len = self.buffer[self.cursor.y].len();
+                let line_len = self.buffer.buffer_text[self.cursor.y].len();
                 self.cursor.x = if line_len > 0 { line_len } else { 0 };
                 false
             }
@@ -237,38 +243,38 @@ impl Editor {
     }
 
     fn save_buffer(&mut self) {
-        let filename = match &self.filename {
-            Some(name) => name.clone(),
-            None => {
-                print!("Enter filename: ");
-                stdout().flush().unwrap();
-                let mut name = String::new();
-                if stdin().read_line(&mut name).is_err() {
-                    println!("Failed to read filename.");
-                    return;
-                }
-
-                let trimmed_name = name.trim().to_string();
-                if trimmed_name.is_empty() {
-                    println!("Filename cannot be empty!");
-                    return;
-                }
-
-                trimmed_name
+        let filename = if self.buffer.buffer_name.is_empty() {
+            print!("Enter filename: ");
+            stdout().flush().unwrap();
+            let mut name = String::new();
+            if stdin().read_line(&mut name).is_err() {
+                println!("Failed to read filename.");
+                return;
             }
+
+            let trimmed_name = name.trim().to_string();
+            if trimmed_name.is_empty() {
+                println!("Filename cannot be empty!");
+                return;
+            }
+
+            self.buffer.buffer_name = trimmed_name.clone(); // update it
+            trimmed_name
+        } else {
+            self.buffer.buffer_name.clone()
         };
 
         match File::create(&filename) {
             Ok(mut file) => {
-                for line in &self.buffer {
+                for line in &self.buffer.buffer_text {
                     if writeln!(file, "{}", line).is_err() {
                         println!("Failed to write to file.");
                         return;
                     }
                 }
+                self.buffer.buffer_name = filename.clone();
 
                 println!("File saved: {}", filename);
-                self.filename = Some(filename);
             }
             Err(err) => {
                 println!("Failed to create file: {}", err);
@@ -281,7 +287,7 @@ impl Editor {
             KeyCode::Esc => {
                 self.mode = Mode::Normal;
                 // Adjust cursor if at end of line
-                let line_len = self.buffer[self.cursor.y].len();
+                let line_len = self.buffer.buffer_text[self.cursor.y].len();
                 if line_len > 0 && self.cursor.x >= line_len {
                     self.cursor.x = line_len - 1;
                 }
@@ -289,7 +295,7 @@ impl Editor {
             }
 
             KeyCode::Char(c) => {
-                let line = &mut self.buffer[self.cursor.y];
+                let line = &mut self.buffer.buffer_text[self.cursor.y];
 
                 if self.cursor.x >= line.len() {
                     line.push(c);
@@ -303,27 +309,27 @@ impl Editor {
 
             KeyCode::Backspace => {
                 if self.cursor.x > 0 {
-                    let line = &mut self.buffer[self.cursor.y];
+                    let line = &mut self.buffer.buffer_text[self.cursor.y];
                     line.remove(self.cursor.x - 1);
                     self.cursor.x -= 1;
                 } else if self.cursor.y > 0 {
-                    let current_line = self.buffer.remove(self.cursor.y);
+                    let current_line = self.buffer.buffer_text.remove(self.cursor.y);
                     self.cursor.y -= 1;
-                    self.cursor.x = self.buffer[self.cursor.y].len();
-                    self.buffer[self.cursor.y].push_str(&current_line);
+                    self.cursor.x = self.buffer.buffer_text[self.cursor.y].len();
+                    self.buffer.buffer_text[self.cursor.y].push_str(&current_line);
                 }
                 false
             }
 
             KeyCode::Enter => {
-                let line = &mut self.buffer[self.cursor.y];
+                let line = &mut self.buffer.buffer_text[self.cursor.y];
                 let new_line = if self.cursor.x < line.len() {
                     line.split_off(self.cursor.x)
                 } else {
                     String::new()
                 };
 
-                self.buffer.insert(self.cursor.y + 1, new_line);
+                self.buffer.buffer_text.insert(self.cursor.y + 1, new_line);
                 self.cursor.y += 1;
                 self.cursor.x = 0;
                 false
@@ -336,7 +342,7 @@ impl Editor {
                 false
             }
             KeyCode::Right => {
-                let line_len = self.buffer[self.cursor.y].len();
+                let line_len = self.buffer.buffer_text[self.cursor.y].len();
                 if self.cursor.x < line_len {
                     self.cursor.x += 1;
                 }
@@ -345,7 +351,7 @@ impl Editor {
             KeyCode::Up => {
                 if self.cursor.y > 0 {
                     self.cursor.y -= 1;
-                    let line_len = self.buffer[self.cursor.y].len();
+                    let line_len = self.buffer.buffer_text[self.cursor.y].len();
                     if self.cursor.x > line_len {
                         self.cursor.x = line_len;
                     }
@@ -353,9 +359,9 @@ impl Editor {
                 false
             }
             KeyCode::Down => {
-                if self.cursor.y < self.buffer.len() - 1 {
+                if self.cursor.y < self.buffer.buffer_text.len() - 1 {
                     self.cursor.y += 1;
-                    let line_len = self.buffer[self.cursor.y].len();
+                    let line_len = self.buffer.buffer_text[self.cursor.y].len();
                     if self.cursor.x > line_len {
                         self.cursor.x = line_len;
                     }

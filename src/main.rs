@@ -1,6 +1,8 @@
+pub mod buffer;
 pub mod cursor;
 pub mod editor;
 pub mod mode;
+pub mod status_column;
 use crossterm::{
     cursor::{Hide, Show},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
