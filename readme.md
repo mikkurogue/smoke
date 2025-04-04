@@ -13,4 +13,4 @@ I want to write something cool.
 
 You can open a file, edit the file and save the file!!!!
 
-thats it.
+That is it. Just the cursor is a bit done goofed
