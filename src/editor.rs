@@ -55,7 +55,7 @@ impl Editor {
     }
 
     pub fn render<W: Write>(&mut self, out: &mut W) -> Result<(), Box<dyn std::error::Error>> {
-        self.cursor.blink();
+        self.cursor.blink(self.mode);
 
         queue!(
             out,
@@ -66,7 +66,7 @@ impl Editor {
         for (y, line) in self.buffer.buffer_text.iter().enumerate() {
             queue!(out, MoveTo(0, y as u16))?;
 
-            if y == self.cursor.x {
+            if y == self.cursor.y {
                 for (x, ch) in line.chars().enumerate() {
                     if x == self.cursor.x && self.cursor.visible {
                         match self.mode {
@@ -144,6 +144,10 @@ impl Editor {
         )?;
 
         queue!(out, Hide)?;
+
+        if self.cursor.visible {
+            queue!(out, MoveTo(self.cursor.x as u16, self.cursor.y as u16))?;
+        }
 
         out.flush()?;
         Ok(())

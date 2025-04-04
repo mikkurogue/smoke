@@ -13,4 +13,4 @@ I want to write something cool.
 
 You can open a file, edit the file and save the file!!!!
 
-That is it. Just the cursor is a bit done goofed
+That is it, tree sitter maybe? LSP support? The sky is the limit!

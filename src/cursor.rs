@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use crate::mode::Mode;
+
 pub struct Cursor {
     pub x: usize,
     pub y: usize,
@@ -19,11 +21,16 @@ impl Cursor {
         }
     }
 
-    pub fn blink(&mut self) {
+    pub fn blink(&mut self, mode: Mode) {
         let now = Instant::now();
+
         if now.duration_since(self.last_blink) >= self.blink_interval {
-            self.visible = !self.visible;
-            self.last_blink = now;
+            if mode == Mode::Normal {
+                self.visible = true;
+            } else {
+                self.visible = !self.visible;
+                self.last_blink = now;
+            }
         }
     }
 }
