@@ -1,3 +1,4 @@
+![build](https://github.com/mikkurogue/smoke/actions/workflows/rust.yml/badge.svg)
 # Smoke
 
 A small modal based text editor written in rust.
