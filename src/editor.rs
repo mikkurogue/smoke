@@ -63,63 +63,90 @@ impl Editor {
         )?;
         queue!(out, MoveTo(0, 0))?;
 
+        let total_lines = self.buffer.buffer_text.len();
+        let line_number_width = total_lines.to_string().len();
+
         for (y, line) in self.buffer.buffer_text.iter().enumerate() {
+            let line_num = y + 1;
+            let is_active = y == self.cursor.y;
+
+            // gutter col first
             queue!(out, MoveTo(0, y as u16))?;
 
-            if y == self.cursor.y {
-                for (x, ch) in line.chars().enumerate() {
-                    if x == self.cursor.x && self.cursor.visible {
-                        match self.mode {
-                            Mode::Normal => {
-                                queue!(
-                                    out,
-                                    SetBackgroundColor(Color::White),
-                                    SetForegroundColor(Color::Black),
-                                    Print(ch),
-                                    ResetColor
-                                )?;
-                            }
-                            Mode::Insert => {
-                                queue!(
-                                    out,
-                                    Print(ch),
-                                    MoveTo(x as u16, y as u16),
-                                    SetBackgroundColor(Color::White),
-                                    Print("|"),
-                                    ResetColor,
-                                    MoveTo(x as u16 + 1, y as u16)
-                                )?;
-                            }
-                        }
-                    } else {
-                        queue!(out, Print(ch))?;
-                    }
-                }
+            if is_active {
+                queue!(
+                    out,
+                    SetForegroundColor(Color::White),
+                    SetBackgroundColor(Color::DarkGrey), // or Color::Blue for vim-like
+                    Print(format!("{:>width$} ", line_num, width = line_number_width)),
+                    ResetColor
+                )?;
+            } else {
+                queue!(
+                    out,
+                    SetForegroundColor(Color::DarkGrey),
+                    Print(format!("{:>width$} ", line_num, width = line_number_width)),
+                    ResetColor
+                )?;
+            }
 
-                if self.cursor.x >= line.len() && self.cursor.visible {
+            for (x, ch) in line.chars().enumerate() {
+                let render_x = (line_number_width + 1 + x) as u16;
+
+                if is_active && x == self.cursor.x && self.cursor.visible {
                     match self.mode {
                         Mode::Normal => {
                             queue!(
                                 out,
+                                MoveTo(render_x, y as u16),
                                 SetBackgroundColor(Color::White),
-                                Print(" "),
+                                SetForegroundColor(Color::Black),
+                                Print(ch),
                                 ResetColor
                             )?;
                         }
                         Mode::Insert => {
                             queue!(
                                 out,
+                                MoveTo(render_x, y as u16),
+                                Print(ch),
+                                MoveTo(render_x, y as u16),
                                 SetBackgroundColor(Color::White),
                                 Print("|"),
                                 ResetColor
                             )?;
                         }
                     }
+                } else {
+                    queue!(out, MoveTo(render_x, y as u16), Print(ch))?;
                 }
-            } else {
-                // Render line normally
-                queue!(out, Print(line))?;
             }
+
+            if is_active && self.cursor.x >= line.len() && self.cursor.visible {
+                let render_x = (line_number_width + 1 + self.cursor.x) as u16;
+                match self.mode {
+                    Mode::Normal => {
+                        queue!(
+                            out,
+                            MoveTo(render_x, y as u16),
+                            SetBackgroundColor(Color::White),
+                            Print(" "),
+                            ResetColor
+                        )?;
+                    }
+                    Mode::Insert => {
+                        queue!(
+                            out,
+                            MoveTo(render_x, y as u16),
+                            SetBackgroundColor(Color::White),
+                            Print("|"),
+                            ResetColor
+                        )?;
+                    }
+                }
+            }
+
+            queue!(out, MoveTo(0, y as u16))?;
         }
 
         let mode_str = match self.mode {
